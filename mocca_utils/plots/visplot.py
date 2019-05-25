@@ -1,8 +1,11 @@
 import sys
 
+import time
 import numpy as np
 import vispy
-from vispy import scene, app
+from vispy import app, gloo, scene
+
+from .shaders import VERT_SHADER, FRAG_SHADER
 
 
 try:
@@ -56,31 +59,34 @@ class CustomPanZoomCamera(scene.PanZoomCamera):
         self.rect._size = (self.x_max - self.x_min, self.y_max - self.y_min)
 
 
-class Plot:
-    def __init__(self, nrows=1, ncols=1, parent=None, grid_options=None, **kwargs):
+class Figure:
+    def __init__(self, nrows=1, ncols=1, grid_options=None, **kwargs):
         self._in_use = np.zeros((nrows, ncols), dtype=np.bool)
+        self.nrows = nrows
+        self.ncols = ncols
 
-        if parent is None:
-            self.parent = self
+        kwargs.setdefault("keys", "interactive")
+        kwargs.setdefault("show", True)
+        kwargs.setdefault("size", (600, 600))
 
-            kwargs.setdefault("keys", "interactive")
-            kwargs.setdefault("show", True)
-            kwargs.setdefault("size", (600, 600))
+        self.canvas = scene.SceneCanvas(**kwargs)
+        # self.canvas.measure_fps()
 
-            self.canvas = scene.SceneCanvas(**kwargs)
-            # self.canvas.measure_fps()
+        self.canvas.on_close = on_close
+        # https://github.com/vispy/vispy/issues/1201
+        self.canvas.native.closeEvent = on_close
+        # self.canvas.events.connect(event_handler)
 
-            self.canvas.on_close = on_close
-            # https://github.com/vispy/vispy/issues/1201
-            self.canvas.native.closeEvent = on_close
-            # self.canvas.events.connect(event_handler)
+        grid_options = {} if grid_options is None else grid_options
+        grid_options.setdefault("spacing", 0)
 
-            grid_options = {} if grid_options is None else grid_options
-            grid_options.setdefault("spacing", 0)
+        self.grid = self.canvas.central_widget.add_grid(**grid_options)
 
-            self.grid = self.canvas.central_widget.add_grid(**grid_options)
-        else:
-            self.parent = parent
+    def get_viewport_position(self, row, col):
+        return (
+            self.canvas.physical_size[1] * (self.nrows - row) / self.nrows,
+            self.canvas.physical_size[0] * col / self.ncols,
+        )
 
     def _get_subplot(
         self, row=None, col=None, row_span=1, col_span=1, view_options=None
@@ -99,36 +105,82 @@ class Plot:
 
         return view, row, col
 
+    def redraw(self):
+        app.process_events()
 
-class TimeSeriesPlot(Plot):
+
+class Plot:
     def __init__(
         self,
-        parent=None,
-        rows=None,
-        cols=None,
-        num_lines=1,
-        window_size=1000,
-        ylim=[-1.2, 1.2],
+        figure=None,
+        tile_rows=None,
+        tile_cols=None,
+        xlim=[-1, 1],
+        ylim=[-1, 1],
         view_options=None,
-        plot_options=None,
-        x_axis_options=None,
         y_axis_options=None,
+        x_axis_options=None,
     ):
-        super().__init__(parent=parent)
+        if figure is None:
+            figure = Figure()
 
-        if isinstance(rows, slice) and isinstance(cols, slice):
-            row, row_span = rows.start, rows.stop - rows.start
-            col, col_span = cols.start, cols.stop - cols.start
+        self.figure = figure
+
+        if isinstance(tile_rows, slice) and isinstance(tile_cols, slice):
+            row, row_span = tile_rows.start, tile_rows.stop - tile_rows.start
+            col, col_span = tile_cols.start, tile_cols.stop - tile_cols.start
         else:
             row = col = None
             row_span = col_span = 1
 
-        self.view, row, col = self.parent._get_subplot(
+        self.view, self.row, self.col = self.figure._get_subplot(
             row, col, row_span, col_span, view_options
         )
         self.view.camera = CustomPanZoomCamera(
-            rect=(0, ylim[0], window_size, ylim[1] - ylim[0]), interactive=False
+            rect=(xlim[0], ylim[0], xlim[1] - xlim[0], ylim[1] - ylim[0]),
+            interactive=False,
         )
+        self.row_span = row_span
+        self.col_span = col_span
+
+        if y_axis_options is not None:
+            y_axis_options.setdefault("orientation", "right")
+            y_axis_options.setdefault("axis_font_size", 12)
+            y_axis_options.setdefault("axis_label_margin", 50)
+            y_axis_options.setdefault("tick_label_margin", 5)
+
+            self.yaxis = scene.AxisWidget(**y_axis_options)
+            self.figure.grid.add_widget(
+                self.yaxis, row=row, col=col, row_span=row_span, col_span=col_span
+            )
+            self.yaxis.link_view(self.view)
+
+        if x_axis_options is not None:
+            x_axis_options.setdefault("orientation", "top")
+            x_axis_options.setdefault("axis_font_size", 12)
+            x_axis_options.setdefault("axis_label_margin", 50)
+            x_axis_options.setdefault("tick_label_margin", 5)
+
+            self.xaxis = scene.AxisWidget(**x_axis_options)
+            self.figure.grid.add_widget(
+                self.xaxis, row=row, col=col, row_span=row_span, col_span=col_span
+            )
+            self.xaxis.link_view(self.view)
+
+    def redraw(self):
+        app.process_events()
+
+
+class TimeSeriesPlot(Plot):
+    def __init__(
+        self,
+        num_lines=1,
+        window_size=1000,
+        ylim=[-1.2, 1.2],
+        plot_options=None,
+        **kwargs
+    ):
+        super().__init__(ylim=ylim, xlim=[0, window_size], **kwargs)
 
         plot_options = {} if plot_options is None else plot_options
         plot_options.setdefault("antialias", False)
@@ -144,30 +196,6 @@ class TimeSeriesPlot(Plot):
             for _ in range(num_lines)
         ]
         self.steps = np.zeros(num_lines, dtype=np.int32)
-
-        if y_axis_options is not None:
-            y_axis_options.setdefault("orientation", "right")
-            y_axis_options.setdefault("axis_font_size", 12)
-            y_axis_options.setdefault("axis_label_margin", 50)
-            y_axis_options.setdefault("tick_label_margin", 5)
-
-            self.yaxis = scene.AxisWidget(**y_axis_options)
-            self.parent.grid.add_widget(
-                self.yaxis, row=row, col=col, row_span=row_span, col_span=col_span
-            )
-            self.yaxis.link_view(self.view)
-
-        if x_axis_options is not None:
-            x_axis_options.setdefault("orientation", "top")
-            x_axis_options.setdefault("axis_font_size", 12)
-            x_axis_options.setdefault("axis_label_margin", 50)
-            x_axis_options.setdefault("tick_label_margin", 5)
-
-            self.xaxis = scene.AxisWidget(**x_axis_options)
-            self.parent.grid.add_widget(
-                self.xaxis, row=row, col=col, row_span=row_span, col_span=col_span
-            )
-            self.xaxis.link_view(self.view)
 
     def add_point(self, y, line_num=0, options=None, redraw=False):
 
@@ -191,39 +219,12 @@ class TimeSeriesPlot(Plot):
         line.set_data(line.pos, **options)
 
         if redraw:
-            app.process_events()
+            self.redraw()
 
 
 class ScatterPlot(Plot):
-    def __init__(
-        self,
-        parent=None,
-        rows=None,
-        cols=None,
-        xlim=[-1, 1],
-        ylim=[-1, 1],
-        view_options=None,
-        plot_options=None,
-        projection=None,
-        x_axis_options=None,
-        y_axis_options=None,
-    ):
-        super().__init__(parent=parent)
-
-        if isinstance(rows, slice) and isinstance(cols, slice):
-            row, row_span = rows.start, rows.stop - rows.start
-            col, col_span = cols.start, cols.stop - cols.start
-        else:
-            row = col = None
-            row_span = col_span = 1
-
-        self.view, row, col = self.parent._get_subplot(
-            row, col, row_span, col_span, view_options
-        )
-        self.view.camera = CustomPanZoomCamera(
-            rect=(xlim[0], ylim[0], xlim[1] - xlim[0], ylim[1] - ylim[0]),
-            interactive=False,
-        )
+    def __init__(self, plot_options=None, projection=None, **kwargs):
+        super().__init__(**kwargs)
 
         plot_options = {} if plot_options is None else plot_options
         plot_options.setdefault("parent", self.view.scene)
@@ -234,30 +235,7 @@ class ScatterPlot(Plot):
             self.scatter.set_data(np.zeros((1, 3)))
             self.view.camera = "turntable"
             self.axis = scene.visuals.XYZAxis(parent=self.view.scene)
-        else:
-            if y_axis_options is not None:
-                y_axis_options.setdefault("orientation", "right")
-                y_axis_options.setdefault("axis_font_size", 12)
-                y_axis_options.setdefault("axis_label_margin", 50)
-                y_axis_options.setdefault("tick_label_margin", 5)
-
-                self.yaxis = scene.AxisWidget(**y_axis_options)
-                self.parent.grid.add_widget(
-                    self.yaxis, row=row, col=col, row_span=row_span, col_span=col_span
-                )
-                self.yaxis.link_view(self.view)
-
-            if x_axis_options is not None:
-                x_axis_options.setdefault("orientation", "top")
-                x_axis_options.setdefault("axis_font_size", 12)
-                x_axis_options.setdefault("axis_label_margin", 50)
-                x_axis_options.setdefault("tick_label_margin", 5)
-
-                self.xaxis = scene.AxisWidget(**x_axis_options)
-                self.parent.grid.add_widget(
-                    self.xaxis, row=row, col=col, row_span=row_span, col_span=col_span
-                )
-                self.xaxis.link_view(self.view)
+        # TODO: might need to remove x/y_axis_options if 3d ...
 
     def update(self, points, options=None, redraw=False):
 
@@ -273,18 +251,96 @@ class ScatterPlot(Plot):
         self.scatter.set_data(points, **options)
 
         if redraw:
-            app.process_events()
+            self.redraw()
+
+
+class MultiTimeSeriesPlot(Plot):
+    def __init__(self, window_size=1000, ts_rows=1, ts_cols=1, colors=None, **kwargs):
+        super().__init__(**kwargs)
+
+        self.window_size = window_size
+        self.ts_rows = ts_rows
+        self.ts_cols = ts_cols
+
+        # Number of signals.
+        self.num_series = ts_rows * ts_cols
+
+        # Various signal amplitudes.
+        # amplitudes = 0.1 + 0.2 * np.random.rand(m, 1).astype(np.float32)
+        self.max_val = 1
+
+        # Generate the signals as a (m, n) array.
+        self.y = np.zeros([self.num_series, window_size], dtype=np.float32)
+
+        # Color of each vertex (TODO: make it more efficient by using a GLSL-based
+        # color map and the index).
+        if colors is None:
+            color = np.repeat(
+                np.random.uniform(size=(self.num_series, 3), low=0.5, high=0.9),
+                window_size,
+                axis=0,
+            ).astype(np.float32)
+
+        # Signal 2D index of each vertex (row and col) and x-index (sample index
+        # within each signal).
+        index = np.c_[
+            np.repeat(np.repeat(np.arange(ts_cols), ts_rows), window_size),
+            np.repeat(np.tile(np.arange(ts_rows), ts_cols), window_size),
+            np.tile(np.arange(window_size), self.num_series),
+        ].astype(np.float32)
+
+        self.program = gloo.Program(VERT_SHADER, FRAG_SHADER)
+        self.program["a_position"] = self.y.reshape(-1, 1)
+        self.program["a_color"] = color
+        self.program["a_index"] = index
+        self.program["u_scale"] = (1.0, 1.0)
+        self.program["u_size"] = (ts_rows, ts_cols)
+        self.program["u_n"] = self.window_size
+
+        # TODO: remove?
+        # gloo.set_state(
+        #     clear_color="black",
+        #     blend=True,
+        #     blend_func=("src_alpha", "one_minus_src_alpha"),
+        # )
+
+        y2, x2 = self.figure.get_viewport_position(self.row, self.col + self.col_span)
+        y1, x1 = self.figure.get_viewport_position(self.row + self.row_span, self.col)
+        self.viewport_positions = (x1, y1, x2 - x1, y2 - y1)
+
+        self.old_draw = self.figure.canvas.on_draw
+        self.figure.canvas.on_draw = self.on_draw
+
+    def on_draw(self, event):
+        gloo.set_viewport(0, 0, *self.figure.canvas.physical_size)
+        self.old_draw(event)
+        gloo.set_viewport(*self.viewport_positions)
+        self.program.draw("line_strip")
+
+    def add_points(self, points, redraw=False):
+        points = np.array(points).reshape(-1)
+        self.max_val = max(self.max_val, np.max(np.abs(points)))
+        self.y[:, :-1] = self.y[:, 1:]
+        self.y[:, -1] = points
+        self.program["a_position"].set_data(
+            self.y.ravel().astype(np.float32) / self.max_val
+        )
+        if redraw:
+            self.redraw()
+
+    def update(self):
+        app.process_events()
 
 
 if __name__ == "__main__":
-    plot = Plot(nrows=2, ncols=3)
+    fig = Figure(nrows=3, ncols=3)
 
     # rows and cols can be (both) integers, slices, or None
     # if None, then will occupy any available space of size 1
     lp1 = TimeSeriesPlot(
-        parent=plot,
-        rows=slice(0, 1),
-        cols=slice(0, 2),
+        figure=fig,
+        tile_rows=slice(0, 1),
+        tile_cols=slice(0, 2),
         num_lines=2,
         # x_axis_options={},
         y_axis_options={},
@@ -295,23 +351,37 @@ if __name__ == "__main__":
     # window_size also defines the number of points we are plotting
     # as long as it is constant (and small-ish), we can plot relatively fast
     T = 100
-    lp2 = TimeSeriesPlot(parent=plot, num_lines=1, window_size=T)
+    lp2 = TimeSeriesPlot(figure=fig, num_lines=1, window_size=T)
+
+    # these plots can be a bit slow if you have many series
+    # MultiTimeSeriesPlot provides a more convenient and faster time-series plot
+    mts = MultiTimeSeriesPlot(
+        figure=fig,
+        tile_rows=slice(1, 2),
+        tile_cols=slice(0, 3),
+        ts_rows=3,
+        ts_cols=3,
+        window_size=40,
+    )
 
     # for scatter plot, we always take 3D points
     # but we can choose to visualize in 3d or 2d using `projection`
-    sc1 = ScatterPlot(parent=plot, projection="3d")
+    sc1 = ScatterPlot(figure=fig, projection="3d")
 
     # Turning off axis will make plotting faster
     sc2 = ScatterPlot(
-        parent=plot,
-        rows=slice(1, 2),
-        cols=slice(1, 3),
+        figure=fig,
+        tile_rows=slice(2, 3),
+        tile_cols=slice(1, 3),
         x_axis_options={},
         y_axis_options={},
     )
 
-    # plot2 = Plot(nrows=1, ncols=1)
-    # lp3 = TimeSeriesPlot(parent=plot2, num_lines=1, window_size=T)
+    pos = np.random.normal(size=(10000, 3), scale=1.2)
+    pos = np.matmul(pos, [[0.7, 0, 0.3], [0, 1, 0], [0.6, 0, 0.4]]) / 20
+    rgba = np.random.uniform(0, 1, size=(10000, 4))
+    options = {"face_color": rgba}
+    sc1.update(pos, options=options)
 
     x = 0
     while True:
@@ -325,14 +395,13 @@ if __name__ == "__main__":
         y3 = np.random.rand()
         lp2.add_point(y3, 0)
 
-        # Doesn't suppose updating individual figures
-        # Everything is updated at the same time
-        # lp3.add_point(y3, 0, redraw=True)
-
-        pos = np.random.normal(size=(10000, 3), scale=1.2)
-        rgba = np.random.uniform(0, 1, size=(10000, 4))
-        options = {"face_color": rgba}
-        sc1.update(pos, options=options)
-
         # Drawing once at the end will redraw every plot
-        sc2.update(pos, options=options, redraw=True)
+        pos = np.random.normal(size=(10000, 3), scale=1.2)
+        sc2.update(pos, options=options)
+
+        mts.add_points(np.random.randn(3, 3))
+
+        # you need to either add the points with redraw=True
+        # or you can explicitly call redraw on the figure or the plots
+        fig.redraw()
+
