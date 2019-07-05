@@ -188,11 +188,14 @@ class TimeSeriesPlot(Plot):
         super().__init__(ylim=ylim, xlim=[0, window_size], **kwargs)
 
         plot_options = {} if plot_options is None else plot_options
-        parent = plot_options["parent"] if "parent" in plot_options else self.view.scene
+
+        if "parent" in plot_options:
+            self.view = plot_options["parent"].view
+            plot_options["parent"] = self.view.scene
 
         plot_options.setdefault("antialias", False)
         plot_options.setdefault("method", "gl")
-        plot_options.setdefault("parent", parent)
+        plot_options.setdefault("parent", self.view.scene)
 
         self.window_size = window_size
         x = np.arange(window_size)
@@ -234,16 +237,19 @@ class ScatterPlot(Plot):
         super().__init__(**kwargs)
 
         plot_options = {} if plot_options is None else plot_options
-        parent = plot_options["parent"] if "parent" in plot_options else self.view.scene
 
-        plot_options.setdefault("parent", parent)
+        if "parent" in plot_options:
+            self.view = plot_options["parent"].view
+            plot_options["parent"] = self.view.scene
+
+        plot_options.setdefault("parent", self.view.scene)
 
         self.scatter = scene.visuals.Markers(**plot_options)
 
         if projection == "3d":
             self.scatter.set_data(np.zeros((1, 3)))
             self.view.camera = "turntable"
-            self.axis = scene.visuals.XYZAxis(parent=parent)
+            self.axis = scene.visuals.XYZAxis(parent=self.view.scene)
         # TODO: might need to remove x/y_axis_options if 3d ...
 
     def update(self, points, options=None, redraw=False):
@@ -348,9 +354,12 @@ class ArrowPlot(Plot):
         super().__init__(**kwargs)
 
         plot_options = {} if plot_options is None else plot_options
-        parent = plot_options["parent"] if "parent" in plot_options else self.view.scene
 
-        plot_options.setdefault("parent", parent)
+        if "parent" in plot_options:
+            self.view = plot_options["parent"].view
+            plot_options["parent"] = self.view.scene
+
+        plot_options.setdefault("parent", self.view.scene)
         plot_options.setdefault("width", 5)
         plot_options.setdefault("method", "gl")
         plot_options.setdefault("arrow_type", "stealth")
@@ -374,6 +383,10 @@ class ArrowPlot(Plot):
             last half is the centre of arrow,
             (last half) - (first half) is the arrow direction
         """
+        if isinstance(self.view.camera, CustomPanZoomCamera):
+            self.view.camera.expand_bounds(lines[:, :, 0].min(), lines[:, :, 1].min())
+            self.view.camera.expand_bounds(lines[:, :, 0].max(), lines[:, :, 1].max())
+
         self.arrows.set_data(pos=lines, arrows=arrows)
 
         if redraw:
@@ -477,7 +490,7 @@ if __name__ == "__main__":
         xlim=[-2, 2],
         ylim=[-2, 2],
         plot_options={
-            "parent": ar1.view.scene,
+            "parent": ar1,
             "width": 3,
             "arrow_size": 10,
             "connect": connect,

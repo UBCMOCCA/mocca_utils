@@ -109,7 +109,7 @@ mystery1 = np.expand_dims(np.concatenate((x, y), axis=1), axis=0)
 plot2 = ArrowPlot(
     figure=None,
     plot_options={
-        "parent": plot1.view.scene,
+        "parent": plot1,
         "width": 3,
         "arrow_size": 15,
         "arrow_color": [green],
@@ -235,7 +235,7 @@ ar2 = ArrowPlot(
     xlim=[-2, 2],
     ylim=[-2, 2],
     plot_options={
-        "parent": ar1.view.scene,
+        "parent": ar1,
         "width": 3,
         "arrow_size": 10,
         "connect": connect,
