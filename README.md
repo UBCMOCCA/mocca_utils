@@ -4,7 +4,9 @@
 
 The library is built on top of [vispy](http://vispy.org/), a more performant but lesser known alternative to matplotlib.  The main feature is that the plots are designed to easily integrate with main loop of another animation or simulation script.
 
-<img title="Demo" style="width: 80%; display: block; margin: 2em auto 2em auto; border-radius: 25px;" src="https://raw.githubusercontent.com/UBCMOCCA/mocca_utils/assets/assets/mocca_utils_demo.gif">
+<p align="center">
+    <img title="Demo" src="https://raw.githubusercontent.com/UBCMOCCA/mocca_utils/assets/assets/mocca_utils_demo.gif">
+</p>
 
 ***
 
