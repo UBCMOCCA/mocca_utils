@@ -1,11 +1,16 @@
+import os
 import sys
+
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.dirname(current_dir)
+os.sys.path.append(parent_dir)
 
 import time
 import numpy as np
 import vispy
 from vispy import app, gloo, scene
 
-from .shaders import VERT_SHADER, FRAG_SHADER
+from plots.shaders import VERT_SHADER, FRAG_SHADER
 
 
 try:
@@ -112,7 +117,7 @@ class Figure:
 class Plot:
     def __init__(
         self,
-        figure=None,
+        figure="new",
         tile_rows=None,
         tile_cols=None,
         xlim=[-1, 1],
@@ -122,9 +127,9 @@ class Plot:
         x_axis_options=None,
     ):
         if figure is None:
-            figure = Figure()
+            return
 
-        self.figure = figure
+        self.figure = Figure() if figure == "new" else figure
 
         if isinstance(tile_rows, slice) and isinstance(tile_cols, slice):
             row, row_span = tile_rows.start, tile_rows.stop - tile_rows.start
@@ -183,9 +188,11 @@ class TimeSeriesPlot(Plot):
         super().__init__(ylim=ylim, xlim=[0, window_size], **kwargs)
 
         plot_options = {} if plot_options is None else plot_options
+        parent = plot_options["parent"] if "parent" in plot_options else self.view.scene
+
         plot_options.setdefault("antialias", False)
         plot_options.setdefault("method", "gl")
-        plot_options.setdefault("parent", self.view.scene)
+        plot_options.setdefault("parent", parent)
 
         self.window_size = window_size
         x = np.arange(window_size)
@@ -227,14 +234,16 @@ class ScatterPlot(Plot):
         super().__init__(**kwargs)
 
         plot_options = {} if plot_options is None else plot_options
-        plot_options.setdefault("parent", self.view.scene)
+        parent = plot_options["parent"] if "parent" in plot_options else self.view.scene
+
+        plot_options.setdefault("parent", parent)
 
         self.scatter = scene.visuals.Markers(**plot_options)
 
         if projection == "3d":
             self.scatter.set_data(np.zeros((1, 3)))
             self.view.camera = "turntable"
-            self.axis = scene.visuals.XYZAxis(parent=self.view.scene)
+            self.axis = scene.visuals.XYZAxis(parent=parent)
         # TODO: might need to remove x/y_axis_options if 3d ...
 
     def update(self, points, options=None, redraw=False):
@@ -332,11 +341,54 @@ class MultiTimeSeriesPlot(Plot):
         app.process_events()
 
 
+class ArrowPlot(Plot):
+    """ LinePlot with arrow """
+
+    def __init__(self, plot_options=None, **kwargs):
+        super().__init__(**kwargs)
+
+        plot_options = {} if plot_options is None else plot_options
+        parent = plot_options["parent"] if "parent" in plot_options else self.view.scene
+
+        plot_options.setdefault("parent", parent)
+        plot_options.setdefault("width", 5)
+        plot_options.setdefault("method", "gl")
+        plot_options.setdefault("arrow_type", "stealth")
+
+        """
+        connect: "segment", "strip", or (_, 2) int32 array.
+            ex. [[0, 1], [1, 2]] will connect vertices 0 and 1, vertices 1 and 2
+        """
+
+        plot_options.setdefault("connect", "segments")
+
+        self.arrows = scene.visuals.Arrow(**plot_options)
+
+    def update(self, lines, arrows, redraw=False):
+        """ lines: array of shape (N, V, 2 or 3),
+            N is the number of lines,
+            V is the number of segments in each line
+            2 or 3 depends on 2D or 3D
+
+            arrows: array of shape (N, 4 or 6)
+            last half is the centre of arrow,
+            (last half) - (first half) is the arrow direction
+        """
+        self.arrows.set_data(pos=lines, arrows=arrows)
+
+        if redraw:
+            self.redraw()
+
+
 if __name__ == "__main__":
     fig = Figure(nrows=3, ncols=3)
 
     # rows and cols can be (both) integers, slices, or None
     # if None, then will occupy any available space of size 1
+    # x-axis range is defined by window_size and xlim
+    # window_size also defines the number of points we are plotting
+    # as long as it is constant (and small-ish), we can plot relatively fast
+    T = 100
     lp1 = TimeSeriesPlot(
         figure=fig,
         tile_rows=slice(0, 1),
@@ -346,12 +398,6 @@ if __name__ == "__main__":
         y_axis_options={},
     )
     lp1_options = {"color": (1, 0, 0, 1)}
-
-    # x-axis range is defined by window_size and xlim
-    # window_size also defines the number of points we are plotting
-    # as long as it is constant (and small-ish), we can plot relatively fast
-    T = 100
-    lp2 = TimeSeriesPlot(figure=fig, num_lines=1, window_size=T)
 
     # these plots can be a bit slow if you have many series
     # MultiTimeSeriesPlot provides a more convenient and faster time-series plot
@@ -383,6 +429,65 @@ if __name__ == "__main__":
     options = {"face_color": rgba}
     sc1.update(pos, options=options)
 
+    # Generate line segments
+    points_per_path = 100
+    theta = np.linspace(0, 2 * np.pi, points_per_path).reshape(points_per_path, 1)
+    circle = np.concatenate((np.cos(theta), np.sin(theta)), axis=1)
+    # (N, T, 2) - N paths, T timesteps in each path, and 2D
+    paths = np.stack((circle + 0.5, circle - 0.5), axis=0).astype(np.float32)
+
+    # Colormap lets us convert float between 0 and 1 to a colour
+    summer_colours = vispy.color.get_colormaps()["summer"]
+    arrow_colours = summer_colours.map(np.linspace(0, 1, paths.shape[0]))
+
+    # ArrowPlot are line plots with a head marker
+    ar1 = ArrowPlot(
+        figure=fig,
+        xlim=[-2, 2],
+        ylim=[-2, 2],
+        plot_options={
+            "width": 3,
+            "arrow_size": 10,
+            "arrow_color": arrow_colours,
+            # colour needs to be defined for each vertex
+            "color": np.repeat(arrow_colours, points_per_path, axis=0),
+        },
+    )
+
+    arrows = np.concatenate((paths[:, -2, :], paths[:, -1, :]), axis=1)
+    ar1.update(paths, arrows)
+
+    num_paths = 2
+    path_length = 100
+
+    autumn_colours = vispy.color.get_colormaps()["autumn"]
+    arrow_colours = autumn_colours.map(np.linspace(0, 1, num_paths))
+
+    N = num_paths * path_length
+    connect = np.empty((N, 2), np.int32)
+    connect[:, 0] = np.arange(N)
+    connect[:, 1] = connect[:, 0] + 1
+    lasts = (np.arange(num_paths) + 1) * path_length - 1
+    connect[lasts, 1] = connect[lasts, 0]
+
+    # Can plot multiple plots in the same space
+    # need to specify figure=None and plot_options.parent
+    ar2 = ArrowPlot(
+        figure=None,
+        xlim=[-2, 2],
+        ylim=[-2, 2],
+        plot_options={
+            "parent": ar1.view.scene,
+            "width": 3,
+            "arrow_size": 10,
+            "connect": connect,
+            "arrow_color": arrow_colours,
+            # colour needs to be defined for each vertex
+            "color": np.repeat(arrow_colours, path_length, axis=0),
+        },
+    )
+    trajectories = np.zeros(shape=(num_paths, path_length, 2), dtype=np.float32)
+
     x = 0
     while True:
         x += 1
@@ -392,16 +497,19 @@ if __name__ == "__main__":
         lp1.add_point(y1, 0, options=lp1_options)
         lp1.add_point(y2, 1)
 
-        y3 = np.random.rand()
-        lp2.add_point(y3, 0)
-
         # Drawing once at the end will redraw every plot
         pos = np.random.normal(size=(10000, 3), scale=1.2)
         sc2.update(pos, options=options)
 
         mts.add_points(np.random.randn(3, 3))
 
+        trajectories[:, :-1] = trajectories[:, 1:]  # roll
+        trajectories[0:, -1] = [y1, y2]
+        trajectories[1:, -1] = [y2, y1]
+
+        arrows = np.concatenate((trajectories[:, -2], trajectories[:, -1]), axis=1)
+        ar2.update(trajectories, arrows)
+
         # you need to either add the points with redraw=True
         # or you can explicitly call redraw on the figure or the plots
         fig.redraw()
-

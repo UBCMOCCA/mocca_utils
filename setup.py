@@ -7,12 +7,8 @@ except ImportError:
 setup(
     name="mocca_utils",
     version="0.1",
-    install_requires=[
-        "numpy",
-        "vispy",
-    ],
+    install_requires=["numpy", "vispy"],
     packages=find_packages(include="mocca_utils*"),
     include_package_data=True,
     zip_safe=False,
 )
-
