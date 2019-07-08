@@ -393,8 +393,69 @@ class ArrowPlot(Plot):
             self.redraw()
 
 
+class HistogramPlot(Plot):
+    def __init__(self, plot_options=None, **kwargs):
+        super().__init__(**kwargs)
+
+        plot_options = {} if plot_options is None else plot_options
+        if "parent" in plot_options:
+            self.view = plot_options["parent"].view
+            plot_options["parent"] = self.view.scene
+
+        plot_options.setdefault("parent", self.view.scene)
+        plot_options.setdefault("bins", 10)
+        plot_options.setdefault("color", (0.3, 0.5, 0.8))
+        plot_options.setdefault("orientation", "h")
+
+        self.options = plot_options
+        self.histogram = scene.Histogram(data=[], **self.options)
+
+    def update(self, data, redraw=False):
+        """ data: 1D array """
+
+        vertices, faces = self._parse_data(data)
+        self.histogram.mesh_data.set_vertices(vertices)
+        self.histogram.mesh_data.set_faces(faces)
+        self.histogram._bounds = self.histogram._meshdata.get_bounds()
+        self.histogram._vshare.bounds.clear()
+        self.histogram.mesh_data_changed()
+
+        x_min_, x_max_ = self.histogram.bounds(axis=0)
+        y_min_, y_max_ = self.histogram.bounds(axis=1)
+        self.view.camera.expand_bounds(x=x_min_, y=y_min_)
+        self.view.camera.expand_bounds(x=x_max_, y=y_max_)
+
+        if redraw:
+            self.redraw()
+
+    def _parse_data(self, data):
+        data = np.asarray(data)
+        if data.ndim != 1:
+            raise ValueError("Only 1D data currently supported")
+
+        X, Y = (0, 1) if self.options["orientation"] == "h" else (1, 0)
+        data, bin_edges = np.histogram(data, self.options["bins"])
+
+        # construct our vertices
+        vertices = np.zeros((3 * len(bin_edges) - 2, 3), np.float32)
+        vertices[:, X] = np.repeat(bin_edges, 3)[1:-1]
+        vertices[1::3, Y] = data
+        vertices[2::3, Y] = data
+        bin_edges.astype(np.float32)
+
+        # and now our faces
+        faces = np.zeros((2 * len(bin_edges) - 2, 3), np.uint32)
+        offsets = 3 * np.arange(len(bin_edges) - 1, dtype=np.uint32)[:, np.newaxis]
+        face1 = np.array([0, 2, 1])
+        face2 = np.array([2, 0, 3])
+        faces[::2] = face1 + offsets
+        faces[1::2] = face2 + offsets
+
+        return vertices, faces
+
+
 if __name__ == "__main__":
-    fig = Figure(nrows=3, ncols=3)
+    fig = Figure(nrows=4, ncols=3)
 
     # rows and cols can be (both) integers, slices, or None
     # if None, then will occupy any available space of size 1
@@ -421,6 +482,14 @@ if __name__ == "__main__":
         ts_rows=3,
         ts_cols=3,
         window_size=40,
+    )
+
+    hist1 = HistogramPlot(
+        figure=fig,
+        tile_rows=slice(3, 4),
+        tile_cols=slice(0, 3),
+        x_axis_options={},
+        plot_options={"bins": 30},
     )
 
     # for scatter plot, we always take 3D points
@@ -522,6 +591,9 @@ if __name__ == "__main__":
 
         arrows = np.concatenate((trajectories[:, -2], trajectories[:, -1]), axis=1)
         ar2.update(trajectories, arrows)
+
+        normal = np.random.normal(0, abs(y1), size=10000)
+        hist1.update(normal)
 
         # you need to either add the points with redraw=True
         # or you can explicitly call redraw on the figure or the plots
