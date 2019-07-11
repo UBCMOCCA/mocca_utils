@@ -14,8 +14,12 @@ The library is built on top of [vispy](http://vispy.org/), a more performant but
 
 ### Pip
 
-```shell
+```bash
 pip install git+https://github.com/UBCMOCCA/mocca_utils#egg=mocca_utils
+
+# Additional packages needed
+# to save plot as a video by pressing F2
+pip install moviepy
 ```
 
 

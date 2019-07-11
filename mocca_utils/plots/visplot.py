@@ -11,6 +11,7 @@ import vispy
 from vispy import app, gloo, scene
 
 from plots.shaders import VERT_SHADER, FRAG_SHADER
+from plots.handlers import key_press_handler as default_key_handler
 
 
 try:
@@ -65,7 +66,9 @@ class CustomPanZoomCamera(scene.PanZoomCamera):
 
 
 class Figure:
-    def __init__(self, nrows=1, ncols=1, grid_options=None, **kwargs):
+    def __init__(
+        self, nrows=1, ncols=1, grid_options=None, key_press_handler="default", **kwargs
+    ):
         self._in_use = np.zeros((nrows, ncols), dtype=np.bool)
         self.nrows = nrows
         self.ncols = ncols
@@ -81,6 +84,10 @@ class Figure:
         # https://github.com/vispy/vispy/issues/1201
         self.canvas.native.closeEvent = on_close
         # self.canvas.events.connect(event_handler)
+
+        self.canvas.events.key_press.connect(
+            default_key_handler if key_press_handler == "default" else key_press_handler
+        )
 
         grid_options = {} if grid_options is None else grid_options
         grid_options.setdefault("spacing", 0)
@@ -109,6 +116,9 @@ class Figure:
         self._in_use[slice(row, row + row_span), slice(col, col + col_span)] = True
 
         return view, row, col
+
+    def get_rgba_array(self):
+        return self.canvas.render()
 
     def redraw(self):
         app.process_events()
