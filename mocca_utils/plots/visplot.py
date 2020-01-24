@@ -66,6 +66,13 @@ class CustomPanZoomCamera(scene.PanZoomCamera):
 
 
 class Figure:
+    """ Analogous to matplotlib Figure(), need to call redraw() every loop to process any event, e.g. mouse, keyboard, and render.
+
+    kwargs: http://vispy.org/scene.html?highlight=scenecanvas#vispy.scene.canvas.SceneCanvas
+    grid_options: https://github.com/vispy/vispy/blob/master/vispy/scene/widgets/grid.py
+    key_press_handler: https://github.com/UBCMOCCA/mocca_utils/blob/master/mocca_utils/plots/handlers.py
+    """
+
     def __init__(
         self, nrows=1, ncols=1, grid_options=None, key_press_handler="default", **kwargs
     ):
@@ -76,6 +83,8 @@ class Figure:
         kwargs.setdefault("keys", "interactive")
         kwargs.setdefault("show", True)
         kwargs.setdefault("size", (600, 600))
+        kwargs.setdefault("title", "")
+        kwargs.setdefault("decorate", False)  # Remove title bar
 
         self.canvas = scene.SceneCanvas(**kwargs)
         # self.canvas.measure_fps()
@@ -125,6 +134,13 @@ class Figure:
 
 
 class Plot:
+    """Setup subplots layout, axes (labels), and camera (x and y limits).
+    Does not actually do any plotting.  No equivalent in matplotlib (?).
+
+    view_options: http://vispy.org/scene.html?highlight=widget#vispy.scene.widgets.Widget
+    {x, y}_axis_options: http://vispy.org/visuals.html?highlight=axisvisual#vispy.visuals.AxisVisual
+    """
+
     def __init__(
         self,
         figure="new",
@@ -160,8 +176,9 @@ class Plot:
 
         if y_axis_options is not None:
             y_axis_options.setdefault("orientation", "right")
-            y_axis_options.setdefault("axis_font_size", 12)
+            y_axis_options.setdefault("axis_font_size", 16)
             y_axis_options.setdefault("axis_label_margin", 50)
+            y_axis_options.setdefault("tick_font_size", 16)
             y_axis_options.setdefault("tick_label_margin", 5)
 
             self.yaxis = scene.AxisWidget(**y_axis_options)
@@ -172,8 +189,9 @@ class Plot:
 
         if x_axis_options is not None:
             x_axis_options.setdefault("orientation", "top")
-            x_axis_options.setdefault("axis_font_size", 12)
+            x_axis_options.setdefault("axis_font_size", 16)
             x_axis_options.setdefault("axis_label_margin", 50)
+            x_axis_options.setdefault("tick_font_size", 16)
             x_axis_options.setdefault("tick_label_margin", 5)
 
             self.xaxis = scene.AxisWidget(**x_axis_options)
@@ -182,11 +200,26 @@ class Plot:
             )
             self.xaxis.link_view(self.view)
 
+        # Axis label is wrong with ubuntu, seems to work fine on Windows.
+        # Need to call self.view.camera.zoom(1) to fix (?)
+        self.axis_need_fixing = 2
+
     def redraw(self):
         app.process_events()
+        if self.axis_need_fixing > 0:
+            self.view.camera.zoom(1)
+            self.axis_need_fixing -= 1
 
 
 class TimeSeriesPlot(Plot):
+    """Scrolling line plot.
+
+    kwargs: Arguments for Plot
+    plot_options: http://vispy.org/scene.html?highlight=line#vispy.scene.visuals.Line
+
+    * Setting line width (e.g. plot_options["width"] = 5) may not work with gl, use plot_options["method"] = "agg" 
+    """
+
     def __init__(
         self,
         num_lines=1,
@@ -243,6 +276,12 @@ class TimeSeriesPlot(Plot):
 
 
 class ScatterPlot(Plot):
+    """2D and 3D scatter plot.
+
+    kwargs: Arguments for Plot
+    plot_options (same as set_data): http://vispy.org/visuals.html?highlight=markers#vispy.visuals.MarkersVisual
+    """
+
     def __init__(self, plot_options=None, projection=None, **kwargs):
         super().__init__(**kwargs)
 
@@ -280,6 +319,9 @@ class ScatterPlot(Plot):
 
 
 class MultiTimeSeriesPlot(Plot):
+    """Faster and tiled version of TimeSeriesPlot (Experimental).
+    """
+
     def __init__(self, window_size=1000, ts_rows=1, ts_cols=1, colors=None, **kwargs):
         super().__init__(**kwargs)
 
@@ -404,6 +446,12 @@ class ArrowPlot(Plot):
 
 
 class HistogramPlot(Plot):
+    """Histogram from 1D data.
+
+    kwargs: Arguments for Plot
+    plot_options: http://vispy.org/scene.html?highlight=histogram#vispy.scene.visuals.Histogram
+    """
+
     def __init__(self, plot_options=None, **kwargs):
         super().__init__(**kwargs)
 
