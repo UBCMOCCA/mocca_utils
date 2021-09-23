@@ -207,7 +207,8 @@ class Plot:
     def redraw(self):
         app.process_events()
         if self.axis_need_fixing > 0:
-            self.view.camera.zoom(1)
+            self.view.camera.zoom(2)
+            self.view.camera.zoom(0.5)
             self.axis_need_fixing -= 1
 
 
